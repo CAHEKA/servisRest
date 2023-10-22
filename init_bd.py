@@ -10,9 +10,7 @@ class Product(db.Model):
     name = db.Column(db.String(80), nullable=False)
     category = db.Column(db.String(80))
     price = db.Column(db.Float, nullable=False)
-    discounted = db.Column(db.Boolean, default=False)
-    discount_type = db.Column(db.String(80))
-    discount_amount = db.Column(db.Float)
+    discount = db.Column(db.Float)
 
 if __name__ == '__main__':
     with app.app_context():
@@ -20,10 +18,10 @@ if __name__ == '__main__':
 
     # Генерация 5 продуктов
     products = [
-        Product(id=1, name='HP Pavilion Laptop', category='Electronics', price=10.99, discounted=True, discount_type='Percentage', discount_amount=10),
-        Product(id=2, name='Samsung Galaxy Smartphone', category='Electronics', price=15.99, discounted=False),
-        Product(id=3, name='Adidas T-shirt', category='Clothing', price=8.99, discounted=True, discount_type='Fixed', discount_amount=2.50),
-        Product(id=4, name='Levis Jeans', category='Clothing', price=12.99, discounted=True, discount_type='Percentage', discount_amount=15)
+        Product(id=1, name='HP Pavilion Laptop', category='Electronics', price=10.99, discount=10),
+        Product(id=2, name='Samsung Galaxy Smartphone', category='Electronics', price=15.99),
+        Product(id=3, name='Adidas T-shirt', category='Clothing', price=8.99, discount=2.50),
+        Product(id=4, name='Levis Jeans', category='Clothing', price=12.99, discount=15)
     ]
 
     # Добавление продуктов в базу данных

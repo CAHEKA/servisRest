@@ -11,6 +11,7 @@ api = Api(app)
 jwt = JWTManager(app)
 db = SQLAlchemy(app)
 
+
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String, unique=True, nullable=False)
@@ -22,14 +23,14 @@ class User(db.Model):
     def check_password(self, secret):
         return check_password_hash(self.password, secret)
 
+
 class Product(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), nullable=False)
     category = db.Column(db.String(80))
     price = db.Column(db.Float, nullable=False)
-    discounted = db.Column(db.Boolean, default=False)
-    discount_type = db.Column(db.String(80))
-    discount_amount = db.Column(db.Float)
+    discount = db.Column(db.Float)
+
 
 class Cart(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -38,22 +39,25 @@ class Cart(db.Model):
     total_price = db.Column(db.Float, nullable=False)
     total_discount = db.Column(db.Float, nullable=False)
 
+
+class CartItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
+    cart_id = db.Column(db.Integer, db.ForeignKey('cart.id'), nullable=False)
+    quantity = db.Column(db.Integer, default=1)
+
+
 class Order(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     items = db.relationship('OrderItem', backref='order', lazy=True)
     total_price = db.Column(db.Float, nullable=False)
 
+
 class OrderItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     order_id = db.Column(db.Integer, db.ForeignKey('order.id'), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
-
-class CartItem(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
-    cart_id = db.Column(db.Integer, db.ForeignKey('cart.id'), nullable=False)
 
 
 with app.app_context():
@@ -77,6 +81,7 @@ class UserRegistration(Resource):
 
         return {'message': 'User registered successfully'}, 201
 
+
 class UserLogin(Resource):
     def post(self):
         parser = reqparse.RequestParser()
@@ -91,6 +96,7 @@ class UserLogin(Resource):
         access_token = create_access_token(identity=user.username)
         return {'access_token': access_token}, 200
 
+
 class ProductList(Resource):
     @jwt_required()
     def get(self, product_id=None):
@@ -103,6 +109,7 @@ class ProductList(Resource):
                 return self.add_product_list([product])
             else:
                 return {'message': 'Product not found'}, 404
+
     @staticmethod
     def add_product_list(products):
         product_list = []
@@ -112,13 +119,10 @@ class ProductList(Resource):
                 'name': product.name,
                 'category': product.category,
                 'price': product.price,
-                'discounted': product.discounted,
-                'discount': {
-                    'type': product.discount_type,
-                    'amount': product.discount_amount
-                } if product.discounted else None
+                'discount': product.discount
             })
         return product_list
+
 
 class ShoppingCart(Resource):
     @jwt_required()
@@ -128,24 +132,38 @@ class ShoppingCart(Resource):
         if not user:
             return {'message': 'User not found'}, 404
 
-        cart_items = CartItem.query.filter_by(user_id=user.id).all()
-        cart_contents = []
+        # Найдем корзину пользователя
+        cart = Cart.query.filter_by(user_id=user.id).first()
+        if not cart:
+            return {'message': 'Cart not found'}, 404
 
-        for item in cart_items:
-            product = Product.query.get(item.product_id)
+        # Получим все элементы корзины для этой корзины
+        cart_items = CartItem.query.filter_by(cart_id=cart.id).all()
+
+        # Соберем информацию о товарах в корзине
+        cart_contents = []
+        total_price = 0
+        for cart_item in cart_items:
+            product = Product.query.get(cart_item.product_id)
+            item_price = product.price * cart_item.quantity  # Цена товара умноженная на количество
+            total_price += item_price  # Добавляем к total_price
             cart_contents.append({
                 'id': product.id,
                 'name': product.name,
                 'category': product.category,
                 'price': product.price,
-                'discounted': product.discounted,
-                'discount': {
-                    'type': product.discount_type,
-                    'amount': product.discount_amount
-                } if product.discounted else None
+                'discount': product.discount,
+                'quantity': cart_item.quantity
             })
 
-        return {'cart': cart_contents}
+        # Добавим total_price и total_discount в ответ
+        response = {
+            'cart': cart_contents,
+            'total_price': total_price,
+            'total_discount': cart.total_discount
+        }
+
+        return response
 
     @jwt_required()
     def post(self):
@@ -154,14 +172,36 @@ class ShoppingCart(Resource):
 
         parser = reqparse.RequestParser()
         parser.add_argument('product_id', type=int, help='This field cannot be blank', required=True)
+        parser.add_argument('quantity', type=int, default=1)  # По умолчанию количество равно 1
         data = parser.parse_args()
 
-        product = Product.query.get(data['product_id'])
+        product_id = data['product_id']
+        quantity = data['quantity']
+
+        product = Product.query.get(product_id)
         if not product:
             return {'message': 'Product not found'}, 404
 
-        cart_item = CartItem(user_id=user.id, product_id=data['product_id'])
-        db.session.add(cart_item)
+        # Поиск существующей корзины пользователя
+        cart = Cart.query.filter_by(user_id=user.id).first()
+
+        # Если корзины пользователя нет, создайте ее
+        if cart is None:
+            cart = Cart(user_id=user.id, total_price=0.0, total_discount=0.0)
+            db.session.add(cart)
+            db.session.commit()
+
+        # Проверим, есть ли уже такой товар в корзине пользователя
+        existing_cart_item = CartItem.query.filter_by(cart_id=cart.id, product_id=product_id).first()
+
+        if existing_cart_item:
+            # Если товар уже есть в корзине, увеличим его количество на указанное количество
+            existing_cart_item.quantity += quantity
+        else:
+            # Если товара нет в корзине, добавим его с указанным количеством
+            cart_item = CartItem(cart_id=cart.id, product_id=product_id, quantity=quantity)
+            db.session.add(cart_item)
+
         db.session.commit()
 
         return {'message': 'Product added to cart successfully'}, 201
@@ -177,68 +217,21 @@ class ShoppingCart(Resource):
         if not cart_item:
             return {'message': 'Product not found in cart'}, 404
 
-        db.session.delete(cart_item)
+        # Если у товара в корзине количество больше одного, уменьшим количество на 1
+        if cart_item.quantity > 1:
+            cart_item.quantity -= 1
+        else:
+            db.session.delete(cart_item)
+
         db.session.commit()
         return {'message': 'Product removed from cart'}, 200
-
-class Checkout(Resource):
-    @jwt_required()
-    def post(self):
-        current_user = get_jwt_identity()
-        user = User.query.filter_by(username=current_user).first()
-        if not user:
-            return {'message': 'User not found'}, 404
-
-        cart_items = CartItem.query.filter_by(user_id=user.id).all()
-        if not cart_items:
-            return {'message': 'Cart is empty'}, 400
-
-        total_price = 0
-        ordered_items = []
-
-        for item in cart_items:
-            product = Product.query.get(item.product_id)
-            price = product.price
-            if product.discounted and product.discount_type == 'Percentage':
-                price -= (product.discount_amount / 100) * price
-            elif product.discounted and product.discount_type == 'Fixed':
-                price -= product.discount_amount
-            total_price += price
-            ordered_items.append({
-                'id': product.id,
-                'name': product.name,
-                'category': product.category,
-                'price': price,
-                'discounted': product.discounted,
-                'discount': {
-                    'type': product.discount_type,
-                    'amount': product.discount_amount
-                } if product.discounted else None
-            })
-
-        # Создание записи заказа (примерное представление)
-        order_id = user.orders.count() + 1
-        for item in cart_items:
-            product = Product.query.get(item.product_id)
-            user.orders.append(OrderItem(product_id=product.id, order_id=order_id))
-        db.session.delete(cart_items)  # Удаляем товары из корзины
-        db.session.commit()
-
-        return {
-            'message': 'Order placed successfully',
-            'order_id': order_id,
-            'total_price': total_price,
-            'ordered_items': ordered_items
-        }, 201
 
 
 # Добавьте ресурс в ваше приложение
 api.add_resource(UserRegistration, '/register')
 api.add_resource(UserLogin, '/login')
 api.add_resource(ProductList, '/products', '/products/<int:product_id>')
-# api.add_resource(ShoppingCart, '/cart', '/cart/<int:product_id>')
-# api.add_resource(Checkout, '/checkout')
-
+api.add_resource(ShoppingCart, '/cart', '/cart/<int:product_id>')
 
 if __name__ == '__main__':
     app.run(debug=True)
