@@ -11,7 +11,6 @@ api = Api(app)
 jwt = JWTManager(app)
 db = SQLAlchemy(app)
 
-
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String, unique=True, nullable=False)
@@ -59,6 +58,26 @@ class OrderItem(db.Model):
     order_id = db.Column(db.Integer, db.ForeignKey('order.id'), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
 
+
+with app.app_context():
+    db.create_all()
+
+    # Проверим, есть ли уже продукты в базе данных
+    if not Product.query.first():
+        # Если нет, то сгенерируем и добавим несколько продуктов
+        products = [
+            Product(name='HP Pavilion Laptop', category='Electronics', price=10.99, discount=10),
+            Product(name='Samsung Galaxy Smartphone', category='Electronics', price=15.99),
+            Product(name='Adidas T-shirt', category='Clothing', price=8.99, discount=2.50),
+            Product(name='Levis Jeans', category='Clothing', price=12.99, discount=15)
+        ]
+
+        for product in products:
+            db.session.add(product)
+
+        db.session.commit()
+
+print("The application is ready to run.")
 
 class UserRegistration(Resource):
     def post(self):
@@ -240,23 +259,5 @@ api.add_resource(ProductList, '/products', '/products/<int:product_id>')
 api.add_resource(ShoppingCart, '/cart', '/cart/<int:product_id>')
 
 if __name__ == '__main__':
+
     app.run(debug=True)
-
-    with app.app_context():
-        db.create_all()
-
-    # Генерация 5 продуктов
-    products = [
-        Product(id=1, name='HP Pavilion Laptop', category='Electronics', price=10.99, discount=10),
-        Product(id=2, name='Samsung Galaxy Smartphone', category='Electronics', price=15.99),
-        Product(id=3, name='Adidas T-shirt', category='Clothing', price=8.99, discount=2.50),
-        Product(id=4, name='Levis Jeans', category='Clothing', price=12.99, discount=15)
-    ]
-
-    # Добавление продуктов в базу данных
-    with app.app_context():
-        for product in products:
-            db.session.add(product)
-        db.session.commit()
-
-    print("5 products have been generated and added to the database.")
