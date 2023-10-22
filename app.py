@@ -139,10 +139,15 @@ class ShoppingCart(Resource):
         # Соберем информацию о товарах в корзине
         cart_contents = []
         total_price = 0
+        total_discount= 0
         for cart_item in cart_items:
             product = Product.query.get(cart_item.product_id)
             item_price = product.price * cart_item.quantity  # Цена товара умноженная на количество
             total_price += item_price  # Добавляем к total_price
+            if product.discount is not None:
+                item_discount = item_price * (product.discount / 100)  # Цена товара умноженная на количество
+                total_discount += item_discount
+
             cart_contents.append({
                 'id': product.id,
                 'name': product.name,
@@ -156,7 +161,7 @@ class ShoppingCart(Resource):
         response = {
             'cart': cart_contents,
             'total_price': total_price,
-            'total_discount': cart.total_discount
+            'total_discount': round(total_discount, 2)
         }
 
         return response
@@ -209,7 +214,12 @@ class ShoppingCart(Resource):
         if not user:
             return {'message': 'User not found'}, 404
 
-        cart_item = CartItem.query.filter_by(user_id=user.id, product_id=product_id).first()
+        # Найдите корзину пользователя по user_id
+        cart = Cart.query.filter_by(user_id=user.id).first()
+        if not cart:
+            return {'message': 'Cart not found for this user'}, 404
+
+        cart_item = CartItem.query.filter_by(cart_id=cart.id, product_id=product_id).first()
         if not cart_item:
             return {'message': 'Product not found in cart'}, 404
 
