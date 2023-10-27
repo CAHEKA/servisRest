@@ -3,6 +3,7 @@ from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity, creat
 from flask_sqlalchemy import SQLAlchemy
 from flask_restful import Api, Resource, reqparse
 from werkzeug.security import check_password_hash, generate_password_hash
+from flask_swagger_ui import get_swaggerui_blueprint
 
 app = Flask(__name__)
 app.config['JWT_SECRET_KEY'] = 'super-secret'  # Секретный ключ для JWT (замените на свой)
@@ -10,6 +11,17 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///myapp.db'  # Использу
 api = Api(app)
 jwt = JWTManager(app)
 db = SQLAlchemy(app)
+
+swaggerui_blueprint = get_swaggerui_blueprint(
+    '/swagger',
+    '/static/swagger.json',
+    config={
+        'app_name': "My Flask Service"
+    }
+)
+
+app.register_blueprint(swaggerui_blueprint, url_prefix='/swagger')
+
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
