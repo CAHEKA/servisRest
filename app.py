@@ -14,7 +14,7 @@ db = SQLAlchemy(app)
 
 swaggerui_blueprint = get_swaggerui_blueprint(
     '/swagger',
-    '/static/swagger.json',
+    '/static/swagger.yaml',
     config={
         'app_name': "My Flask Service"
     }

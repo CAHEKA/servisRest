@@ -1,0 +1,268 @@
+swagger: '2.0'
+info:
+  title: Your API
+  version: '0.1'
+basePath: /
+securityDefinitions:
+  Bearer:
+    type: apiKey
+    name: Authorization
+    in: header
+    description: Enter the token with the Bearer + token
+tags:
+  - name: User
+    description: User registration and login
+  - name: Product
+    description: Product related operations
+  - name: Cart
+    description: Shopping Cart operations
+paths:
+  /register:
+    post:
+      summary: Register a new user
+      operationId: registerUser
+      tags:
+        - User
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/UserRegistrationRequest'
+      responses:
+        201:
+          description: User registered successfully
+        400:
+          description: User already exists
+  /login:
+    post:
+      summary: Log in with username and password
+      operationId: loginUser
+      tags:
+        - User
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/UserLoginRequest'
+      responses:
+        200:
+          description: Access token received
+        401:
+          description: Invalid credentials
+  /products:
+    get:
+      summary: Get a list of products
+      operationId: getProducts
+      tags:
+        - Product
+      responses:
+        200:
+          description: List of products
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/Product'
+    post:
+      summary: Add a new product
+      operationId: addProduct
+      tags:
+        - Product
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/NewProduct'
+      responses:
+        201:
+          description: Product added successfully
+  /products/{product_id}:
+    get:
+      summary: Get information about a specific product
+      operationId: getProductById
+      tags:
+        - Product
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          type: integer
+          format: int64
+      responses:
+        200:
+          description: Product information
+          schema:
+            $ref: '#/definitions/Product'
+    put:
+      summary: Update information about a specific product
+      operationId: updateProduct
+      tags:
+        - Product
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          type: integer
+          format: int64
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/UpdatedProduct'
+      responses:
+        200:
+          description: Product updated successfully
+        404:
+          description: Product not found
+    delete:
+      summary: Delete a specific product
+      operationId: deleteProduct
+      tags:
+        - Product
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          type: integer
+          format: int64
+      responses:
+        200:
+          description: Product deleted successfully
+        404:
+          description: Product not found
+  /cart:
+    get:
+      summary: Get the user's shopping cart
+      operationId: getShoppingCart
+      tags:
+        - Cart
+      security:
+        - Bearer: []
+      responses:
+        200:
+          description: User's shopping cart
+          schema:
+            $ref: '#/definitions/ShoppingCartResponse'
+    post:
+      summary: Add a product to the user's shopping cart
+      operationId: addToCart
+      tags:
+        - Cart
+      security:
+        - Bearer: []
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/AddToCartRequest'
+      responses:
+        201:
+          description: Product added to cart successfully
+  /cart/{product_id}:
+    delete:
+      summary: Remove a product from the user's shopping cart
+      operationId: removeFromCart
+      tags:
+        - Cart
+      security:
+        - Bearer: []
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          type: integer
+          format: int64
+      responses:
+        200:
+          description: Product removed from cart successfully
+        404:
+          description: Product not found
+
+definitions:
+  UserRegistrationRequest:
+    type: object
+    properties:
+      username:
+        type: string
+      password:
+        type: string
+  UserLoginRequest:
+    type: object
+    properties:
+      username:
+        type: string
+      password:
+        type: string
+  Product:
+    type: object
+    properties:
+      id:
+        type: integer
+        example: 1
+      name:
+        type: string
+        example: HP Pavilion Laptop
+      category:
+        type: string
+        example: Electronics
+      price:
+        type: number
+        example: 10.99
+      discount:
+        type: number
+        example: 10
+  NewProduct:
+    type: object
+    properties:
+      name:
+        type: string
+        example: New Product
+      category:
+        type: string
+        example: Electronics
+      price:
+        type: number
+        example: 12.99
+      discount:
+        type: number
+        example: 5
+  UpdatedProduct:
+    type: object
+    properties:
+      name:
+        type: string
+        example: Updated Product Name
+      category:
+        type: string
+        example: Electronics
+      price:
+        type: number
+        example: 15.99
+      discount:
+        type: number
+        example: 8
+  ShoppingCartResponse:
+    type: object
+    properties:
+      cart:
+        type: array
+        items:
+          $ref: '#/definitions/Product'
+      total_price:
+        type: number
+        example: 21.98
+      total_discount:
+        type: number
+        example: 2.2
+  AddToCartRequest:
+    type: object
+    properties:
+      product_id:
+        type: integer
+        example: 1
+      quantity:
+        type: integer
+        example: 2
