@@ -1,275 +1,223 @@
-from flask import Flask
-from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity, create_access_token
-from flask_sqlalchemy import SQLAlchemy
-from flask_restful import Api, Resource, reqparse
-from werkzeug.security import check_password_hash, generate_password_hash
-from flask_swagger_ui import get_swaggerui_blueprint
+from flask import Flask, jsonify, request, render_template
+from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity
+import sqlite3
+import hashlib
 
 app = Flask(__name__)
-app.config['JWT_SECRET_KEY'] = 'super-secret'  # Секретный ключ для JWT (замените на свой)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///myapp.db'  # Используем SQLite базу данных
-api = Api(app)
+app.config['JWT_SECRET_KEY'] = 'super-secret'
 jwt = JWTManager(app)
-db = SQLAlchemy(app)
-
-swaggerui_blueprint = get_swaggerui_blueprint(
-    '/swagger',
-    '/static/swagger.yaml',
-    config={
-        'app_name': "My Flask Service"
-    }
-)
-
-app.register_blueprint(swaggerui_blueprint, url_prefix='/swagger')
 
 
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String, unique=True, nullable=False)
-    password = db.Column(db.String, nullable=False)
-
-    def set_password(self, secret):
-        self.password = generate_password_hash(secret)
-
-    def check_password(self, secret):
-        return check_password_hash(self.password, secret)
+conn = sqlite3.connect('myapp.db', check_same_thread=False)
+cursor = conn.cursor()
 
 
-class Product(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(80), nullable=False)
-    category = db.Column(db.String(80))
-    price = db.Column(db.Float, nullable=False)
-    discount = db.Column(db.Float)
+cursor.execute('''CREATE TABLE IF NOT EXISTS users
+                  (id INTEGER PRIMARY KEY, username TEXT, password TEXT)''')
+
+cursor.execute('''CREATE TABLE IF NOT EXISTS products
+                  (id INTEGER PRIMARY KEY, name TEXT, category TEXT, price REAL, discount REAL)''')
+
+cursor.execute('''CREATE TABLE IF NOT EXISTS carts
+                  (id INTEGER PRIMARY KEY, user_id INTEGER, total_price REAL, total_discount REAL)''')
+
+cursor.execute('''CREATE TABLE IF NOT EXISTS cart_items
+                  (id INTEGER PRIMARY KEY, cart_id INTEGER, product_id INTEGER, quantity INTEGER)''')
 
 
-class Cart(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    items = db.relationship('CartItem', backref='cart', lazy=True)
-    total_price = db.Column(db.Float, nullable=False)
-    total_discount = db.Column(db.Float, nullable=False)
+products = [
+    ('HP Pavilion Laptop', 'Electronics', 10.99, 10),
+    ('Samsung Galaxy Smartphone', 'Electronics', 15.99, None),
+    ('Adidas T-shirt', 'Clothing', 8.99, 2.50),
+    ('Levis Jeans', 'Clothing', 12.99, 15)
+]
+cursor.executemany("INSERT INTO products (name, category, price, discount) VALUES (?, ?, ?, ?)", products)
+
+conn.commit()
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
+    if not username or not password:
+        return jsonify({'message': 'Username and password are required'}), 400
+
+    hashed_password = hashlib.sha256(password.encode()).hexdigest()
+    cursor.execute("SELECT id FROM users WHERE username=?", (username,))
+    if cursor.fetchone():
+        return jsonify({'message': 'User already exists'}), 400
+
+    cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hashed_password))
+    conn.commit()
+
+    return jsonify({'message': 'User registered successfully'}), 201
 
 
-class CartItem(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
-    cart_id = db.Column(db.Integer, db.ForeignKey('cart.id'), nullable=False)
-    quantity = db.Column(db.Integer, default=1)
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
+    if not username or not password:
+        return jsonify({'message': 'Username and password are required'}), 400
+
+    hashed_password = hashlib.sha256(password.encode()).hexdigest()
+    cursor.execute("SELECT id FROM users WHERE username=? AND password=?", (username, hashed_password))
+    user = cursor.fetchone()
+
+    if not user:
+        return jsonify({'message': 'Invalid credentials'}), 401
+
+    access_token = create_access_token(identity=username)
+    return jsonify(access_token=access_token), 200
 
 
-class Order(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    items = db.relationship('OrderItem', backref='order', lazy=True)
-    total_price = db.Column(db.Float, nullable=False)
-
-
-class OrderItem(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    order_id = db.Column(db.Integer, db.ForeignKey('order.id'), nullable=False)
-    product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
-
-
-with app.app_context():
-    db.create_all()
-
-    # Проверим, есть ли уже продукты в базе данных
-    if not Product.query.first():
-        # Если нет, то сгенерируем и добавим несколько продуктов
-        products = [
-            Product(name='HP Pavilion Laptop', category='Electronics', price=10.99, discount=10),
-            Product(name='Samsung Galaxy Smartphone', category='Electronics', price=15.99),
-            Product(name='Adidas T-shirt', category='Clothing', price=8.99, discount=2.50),
-            Product(name='Levis Jeans', category='Clothing', price=12.99, discount=15)
-        ]
-
-        for product in products:
-            db.session.add(product)
-
-        db.session.commit()
-
-print("The application is ready to run.")
-
-class UserRegistration(Resource):
-    def post(self):
-        parser = reqparse.RequestParser()
-        parser.add_argument('username', help='This field cannot be blank', required=True)
-        parser.add_argument('password', help='This field cannot be blank', required=True)
-        data = parser.parse_args()
-
-        if User.query.filter_by(username=data['username']).first():
-            return {'message': 'User already exists'}, 400
-
-        new_user = User(username=data['username'])
-        new_user.set_password(data['password'])
-        db.session.add(new_user)
-        db.session.commit()
-
-        return {'message': 'User registered successfully'}, 201
-
-
-class UserLogin(Resource):
-    def post(self):
-        parser = reqparse.RequestParser()
-        parser.add_argument('username', help='This field cannot be blank', required=True)
-        parser.add_argument('password', help='This field cannot be blank', required=True)
-        data = parser.parse_args()
-
-        user = User.query.filter_by(username=data['username']).first()
-        if not user or not user.check_password(data['password']):
-            return {'message': 'Invalid credentials'}, 401
-
-        access_token = create_access_token(identity=user.username)
-        return {'access_token': access_token}, 200
-
-
-class ProductList(Resource):
-    @jwt_required()
-    def get(self, product_id=None):
-        if product_id is None:
-            products = Product.query.all()
-            return self.add_product_list(products)
+@app.route('/products', methods=['GET'])
+def get_products(product_id=None):
+    if product_id is None:
+        cursor.execute("SELECT * FROM products")
+        products = cursor.fetchall()
+        if products:
+            return jsonify(add_product_list(products)), 200
         else:
-            product = Product.query.get(product_id)
-            if product is not None:
-                return self.add_product_list([product])
-            else:
-                return {'message': 'Product not found'}, 404
+            return jsonify({'message': 'No products found'}), 404
+    else:
+        cursor.execute("SELECT * FROM products WHERE id=?", (product_id,))
+        product = cursor.fetchone()
+        if product:
+            return jsonify(add_product_list([product])), 200
+        else:
+            return jsonify({'message': 'Product not found'}), 404
 
-    @staticmethod
-    def add_product_list(products):
-        product_list = []
-        for product in products:
-            product_list.append({
-                'id': product.id,
-                'name': product.name,
-                'category': product.category,
-                'price': product.price,
-                'discount': product.discount
-            })
-        return product_list
+@app.route('/products/<int:product_id>', methods=['GET'])
+def get_product(product_id):
+    cursor.execute("SELECT * FROM products WHERE id=?", (product_id,))
+    product = cursor.fetchone()
+    if product:
+        return jsonify(add_product_list([product])), 200
+    else:
+        return jsonify({'message': 'Product not found'}), 404
+def add_product_list(products):
+    product_list = []
+    for product in products:
+        product_list.append({
+            'id': product[0],
+            'name': product[1],
+            'category': product[2],
+            'price': product[3],
+            'discount': product[4]
+        })
+    return product_list
 
 
-class ShoppingCart(Resource):
-    @jwt_required()
-    def get(self):
-        current_user = get_jwt_identity()
-        user = User.query.filter_by(username=current_user).first()
-        if not user:
-            return {'message': 'User not found'}, 404
+@app.route('/cart', methods=['GET', 'POST'])
+@jwt_required()
+def shopping_cart():
+    current_user = get_jwt_identity()
+    user = cursor.execute("SELECT id FROM users WHERE username=?", (current_user,)).fetchone()
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
 
-        # Найдем корзину пользователя
-        cart = Cart.query.filter_by(user_id=user.id).first()
+    if request.method == 'GET':
+        cart = cursor.execute("SELECT * FROM carts WHERE user_id=?", (user[0],)).fetchone()
         if not cart:
-            return {'message': 'Cart not found'}, 404
+            return jsonify({'message': 'Cart not found'}), 404
 
-        # Получим все элементы корзины для этой корзины
-        cart_items = CartItem.query.filter_by(cart_id=cart.id).all()
+        cart_items = cursor.execute("SELECT * FROM cart_items WHERE cart_id=?", (cart[0],)).fetchall()
 
-        # Соберем информацию о товарах в корзине
         cart_contents = []
         total_price = 0
-        total_discount= 0
+        total_discount = 0
         for cart_item in cart_items:
-            product = Product.query.get(cart_item.product_id)
-            item_price = product.price * cart_item.quantity  # Цена товара умноженная на количество
-            total_price += item_price  # Добавляем к total_price
-            if product.discount is not None:
-                item_discount = item_price * (product.discount / 100)  # Цена товара умноженная на количество
-                total_discount += item_discount
+            product = cursor.execute("SELECT * FROM products WHERE id=?", (cart_item[2],)).fetchone()
+            if product:
+                item_price = product[3] * cart_item[3]
+                total_price += item_price
+                if product[4] is not None:
+                    item_discount = item_price * (product[4] / 100)
+                    total_discount += item_discount
 
-            cart_contents.append({
-                'id': product.id,
-                'name': product.name,
-                'category': product.category,
-                'price': product.price,
-                'discount': product.discount,
-                'quantity': cart_item.quantity
-            })
+                cart_contents.append({
+                    'id': product[0],
+                    'name': product[1],
+                    'category': product[2],
+                    'price': product[3],
+                    'discount': product[4],
+                    'quantity': cart_item[3]
+                })
 
-        # Добавим total_price и total_discount в ответ
         response = {
             'cart': cart_contents,
             'total_price': total_price,
             'total_discount': round(total_discount, 2)
         }
 
-        return response
+        return jsonify(response), 200
 
-    @jwt_required()
-    def post(self):
-        current_user = get_jwt_identity()
-        user = User.query.filter_by(username=current_user).first()
+    elif request.method == 'POST':
+        data = request.get_json()
+        product_id = data.get('product_id')
+        quantity = data.get('quantity', 1)
 
-        parser = reqparse.RequestParser()
-        parser.add_argument('product_id', type=int, help='This field cannot be blank', required=True)
-        parser.add_argument('quantity', type=int, default=1)  # По умолчанию количество равно 1
-        data = parser.parse_args()
-
-        product_id = data['product_id']
-        quantity = data['quantity']
-
-        product = Product.query.get(product_id)
+        product = cursor.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
         if not product:
-            return {'message': 'Product not found'}, 404
+            return jsonify({'message': 'Product not found'}), 404
 
-        # Поиск существующей корзины пользователя
-        cart = Cart.query.filter_by(user_id=user.id).first()
-
-        # Если корзины пользователя нет, создайте ее
-        if cart is None:
-            cart = Cart(user_id=user.id, total_price=0.0, total_discount=0.0)
-            db.session.add(cart)
-            db.session.commit()
-
-        # Проверим, есть ли уже такой товар в корзине пользователя
-        existing_cart_item = CartItem.query.filter_by(cart_id=cart.id, product_id=product_id).first()
-
-        if existing_cart_item:
-            # Если товар уже есть в корзине, увеличим его количество на указанное количество
-            existing_cart_item.quantity += quantity
-        else:
-            # Если товара нет в корзине, добавим его с указанным количеством
-            cart_item = CartItem(cart_id=cart.id, product_id=product_id, quantity=quantity)
-            db.session.add(cart_item)
-
-        db.session.commit()
-
-        return {'message': 'Product added to cart successfully'}, 201
-
-    @jwt_required()
-    def delete(self, product_id):
-        current_user = get_jwt_identity()
-        user = User.query.filter_by(username=current_user).first()
-        if not user:
-            return {'message': 'User not found'}, 404
-
-        # Найдите корзину пользователя по user_id
-        cart = Cart.query.filter_by(user_id=user.id).first()
+        cart = cursor.execute("SELECT * FROM carts WHERE user_id=?", (user[0],)).fetchone()
         if not cart:
-            return {'message': 'Cart not found for this user'}, 404
-
-        cart_item = CartItem.query.filter_by(cart_id=cart.id, product_id=product_id).first()
-        if not cart_item:
-            return {'message': 'Product not found in cart'}, 404
-
-        # Если у товара в корзине количество больше одного, уменьшим количество на 1
-        if cart_item.quantity > 1:
-            cart_item.quantity -= 1
+            cursor.execute("INSERT INTO carts (user_id, total_price, total_discount) VALUES (?, ?, ?)",
+                           (user[0], 0.0, 0.0))
+            conn.commit()
+            cart_id = cursor.lastrowid
         else:
-            db.session.delete(cart_item)
+            cart_id = cart[0]
 
-        db.session.commit()
-        return {'message': 'Product removed from cart'}, 200
+        cart_item = cursor.execute("SELECT * FROM cart_items WHERE cart_id=? AND product_id=?",
+                                   (cart_id, product_id)).fetchone()
+
+        if cart_item:
+            cursor.execute("UPDATE cart_items SET quantity = quantity + ? WHERE cart_id=? AND product_id=?",
+                           (quantity, cart_id, product_id))
+        else:
+            cursor.execute("INSERT INTO cart_items (cart_id, product_id, quantity) VALUES (?, ?, ?)",
+                           (cart_id, product_id, quantity))
+
+        conn.commit()
+        return jsonify({'message': 'Product added to cart successfully'}), 201
 
 
-# Добавьте ресурс в ваше приложение
-api.add_resource(UserRegistration, '/register')
-api.add_resource(UserLogin, '/login')
-api.add_resource(ProductList, '/products', '/products/<int:product_id>')
-api.add_resource(ShoppingCart, '/cart', '/cart/<int:product_id>')
+@app.route('/cart/<int:product_id>', methods=['DELETE'])
+@jwt_required()
+def delete_product_from_cart(product_id):
+    current_user = get_jwt_identity()
+    user = cursor.execute("SELECT id FROM users WHERE username=?", (current_user,)).fetchone()
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+
+    cart = cursor.execute("SELECT * FROM carts WHERE user_id=?", (user[0],)).fetchone()
+    if not cart:
+        return jsonify({'message': 'Cart not found for this user'}), 404
+
+    cart_item = cursor.execute("SELECT * FROM cart_items WHERE cart_id=? AND product_id=?",
+                               (cart[0], product_id)).fetchone()
+    if not cart_item:
+        return jsonify({'message': 'Product not found in cart'}), 404
+
+    if cart_item[3] > 1:
+        cursor.execute("UPDATE cart_items SET quantity = quantity - 1 WHERE cart_id=? AND product_id=?",
+                       (cart[0], product_id))
+    else:
+        cursor.execute("DELETE FROM cart_items WHERE cart_id=? AND product_id=?", (cart[0], product_id))
+
+    conn.commit()
+    return jsonify({'message': 'Product removed from cart'}), 200
+@app.route('/swagger/')
+def swagger_ui():
+    return render_template('swagger.html')
+
 
 if __name__ == '__main__':
-
     app.run(debug=True)
